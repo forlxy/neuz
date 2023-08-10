@@ -15,8 +15,10 @@ tauri-build = { version = "1.4", features = [] }
 [dependencies]
 tauri = { version = "1.4", features = ["api-all"] }
 rand = "0.8.5"
-image = "0.24.2"
+image = "0.24.6"
 guard = "0.5.1"
+imageproc = "0.23.0"
+tesseract = "0.15.0"
 
 # Parallelization
 parking_lot = "0.12"

@@ -486,8 +486,20 @@ fn start_bot(profile_id: String, state: tauri::State<AppState>, app_handle: taur
                     .client_stats
                     .update(&image_analyzer.clone(), &logger);
 
+                // Check disconnect
+                image_analyzer.detect_disconnect(&logger);
+
                 // Run the current behavior
                 guard!(let Some(mode) = config.mode() else { continue; });
+
+                // Reconnect
+                let is_disconnect = image_analyzer.is_disconnect;
+
+                if is_disconnect {
+                    eval_send_key(&window, "Enter", KeyMode::Press);
+                    std::thread::sleep(Duration::from_millis(1500));
+                    continue;
+                }
 
                 // Stop bot in case of death
                 let is_alive = image_analyzer.client_stats.is_alive();

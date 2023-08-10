@@ -188,6 +188,28 @@ impl FarmingBehavior<'_> {
         None
     }
 
+    fn get_slots_for(
+        &mut self,
+        config: &FarmingConfig,
+        threshold: Option<u32>,
+        slot_type: SlotType,
+        send: bool,
+    ) -> Vec<(usize, usize)> {
+        let mut indexes = Vec::new();
+        let slot_indexes =
+            config.get_usable_slot_indexes(slot_type, threshold, self.slots_usage_last_time);
+        if !slot_indexes.is_empty() {
+            for slot_index in slot_indexes {
+                if send {
+                    //slog::debug!(self.logger, "Slot usage"; "slot_type" => slot_type.to_string(), "value" => threshold);
+                    self.send_slot(slot_index);
+                }
+                indexes.push(slot_index);
+            }
+        }
+        indexes
+    }
+
     fn send_slot(&mut self, slot_index: (usize, usize)) {
         // Send keystroke for first slot mapped to pill
         send_slot_eval(self.window, slot_index.0, slot_index.1);
@@ -209,8 +231,9 @@ impl FarmingBehavior<'_> {
         } else {
             let slot = self.get_slot_for(config, None, SlotType::PickupMotion, false);
             if let Some(index) = slot {
-                for _i in 1..7 {
+                for _i in 1..10 {
                     send_slot_eval(self.window, index.0, index.1);
+                    std::thread::sleep(Duration::from_millis(150));
                 }
             }
         }
@@ -219,12 +242,9 @@ impl FarmingBehavior<'_> {
     fn check_restorations(&mut self, config: &FarmingConfig, image: &mut ImageAnalyzer) {
         // Check HP
         let stat = Some(image.client_stats.hp.value);
-        if image.client_stats.hp.value > 0
-            && self
-                .get_slot_for(config, stat, SlotType::Pill, true)
-                .is_none()
-        {
-            self.get_slot_for(config, stat, SlotType::Food, true);
+        if image.client_stats.hp.value > 0 {
+            self.get_slot_for(config, stat, SlotType::Pill, true);
+            self.get_slots_for(config, stat, SlotType::Food, true);
         }
 
         // Check MP
@@ -317,19 +337,37 @@ impl FarmingBehavior<'_> {
                 false => 1000,
             };
 
-            // Get aggressive mobs to prioritize them
+            // Get aggressive mobs to prioritize them, but divide max_distance by 2 for aggressive mobs to avoid uncontrolable moving
             let mut mob_list = mobs
                 .iter()
                 .filter(|m| m.target_type == TargetType::Mob(MobType::Aggressive))
                 .cloned()
                 .collect::<Vec<_>>();
 
+            // Check again
+            if !mob_list.is_empty() && !(self.last_killed_type == MobType::Aggressive && mob_list.len() == 1 && self.last_kill_time.elapsed().as_millis() < 5000) {
+                self.rotation_movement_tries = 0;
+                //slog::debug!(self.logger, "Found mobs"; "mob_type" => mob_type, "mob_count" => mob_list.len());
+                if let Some(mob) = {
+                    // Try avoiding detection of last killed mob
+                    if !self.avoided_bounds.is_empty() {
+                        image.find_closest_mob(
+                            mob_list.as_slice(),
+                            Some(&self.avoided_bounds),
+                            max_distance,
+                            self.logger,
+                        )
+                    } else {
+                        image.find_closest_mob(mob_list.as_slice(), None, max_distance, self.logger)
+                    }
+                } {
+                    // Transition to next state
+                    return State::EnemyFound(*mob)
+                }
+            } 
+            mob_list.clear();
             // Check if there's aggressive mobs otherwise collect passive mobs
-            if (mob_list.is_empty()
-                || self.last_killed_type == MobType::Aggressive
-                    && mob_list.len() == 1
-                    && self.last_kill_time.elapsed().as_millis() < 5000)
-                && image.client_stats.hp.value >= config.min_hp_attack()
+            if image.client_stats.hp.value >= config.min_hp_attack()
             {
                 mob_list = mobs
                     .iter()
