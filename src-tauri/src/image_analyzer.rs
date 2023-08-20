@@ -9,6 +9,11 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use slog::Logger;
 use tauri::Window;
 
+use image::{DynamicImage, Rgb, Rgba};
+use imageproc::contrast::adaptive_threshold;
+use std::io::Cursor;
+use tesseract::Tesseract;
+
 use crate::{
     data::{point_selector, Bounds, ClientStats, MobType, Point, PointCloud, Target, TargetType},
     ipc::FarmingConfig,
@@ -27,11 +32,36 @@ impl Color {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum BoundsArea {
+    Ping,
+    Toast,
+    SelectName,
+    MobElement,
+    MobLevel,
+    Experience,
+}
+
+impl BoundsArea {
+    fn to_rect(&self) -> Bounds {
+        match self {
+            BoundsArea::Ping => Bounds::new(2, 110, 120, 20),
+            BoundsArea::Toast => Bounds::new(240, 460, 350, 100),
+            BoundsArea::SelectName => Bounds::new(333, 0, 202, 28),
+            BoundsArea::MobElement => Bounds::new(267, 0, 68, 70),
+            BoundsArea::MobLevel => Bounds::new(284, 24, 40, 40),
+            BoundsArea::Experience => Bounds::new(148, 86, 74, 14),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ImageAnalyzer {
     image: Option<ImageBuffer>,
     pub window_id: u64,
     pub client_stats: ClientStats,
+    pub disconnect_count: i8,
+    pub is_disconnect: bool,
 }
 
 impl ImageAnalyzer {
@@ -40,6 +70,8 @@ impl ImageAnalyzer {
             window_id: 0,
             image: None,
             client_stats: ClientStats::new(window.to_owned()),
+            disconnect_count: 0,
+            is_disconnect: false,
         }
     }
 
@@ -62,6 +94,122 @@ impl ImageAnalyzer {
         }
     }
 
+    fn rgba8_to_rgb8(
+        input: image::ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ) -> image::ImageBuffer<Rgb<u8>, Vec<u8>> {
+        let width = input.width() as usize;
+        let height = input.height() as usize;
+
+        // Get the raw image data as a vector
+        let input: &Vec<u8> = input.as_raw();
+
+        // Allocate a new buffer for the RGB image, 3 bytes per pixel
+        let mut output_data = vec![0u8; width * height * 3];
+
+        let mut i = 0;
+        // Iterate through 4-byte chunks of the image data (RGBA bytes)
+        for chunk in input.chunks(4) {
+            // ... and copy each of them to output, leaving out the A byte
+            output_data[i..i + 3].copy_from_slice(&chunk[0..3]);
+            i += 3;
+        }
+
+        // Construct a new image
+        image::ImageBuffer::from_raw(width as u32, height as u32, output_data).unwrap()
+    }
+
+    pub fn detect_disconnect(&mut self, logger: &Logger) {
+        let image = self.image.as_ref().unwrap();
+        // let un_image = self.image.unwrap();
+        let text = self
+            .perform_ocr(image, BoundsArea::Ping, Some("eng"))
+            .unwrap();
+
+        if self.disconnect_count > 10 {
+            self.is_disconnect = true;
+        } else {
+            self.is_disconnect = false;
+        }
+        if let Some(index) = text.find("ms") {
+            // println!("{}", index);
+
+            let s = text.chars();
+            let sub: String = s.into_iter().take(index).collect();
+            // let latency = "0".parse::<u32>().ok();
+            // println!("substr {:?}", sub);
+            // println!("latency {:?}", latency);
+            // println!("disconnect_count {}", self.disconnect_count);
+            if sub == "0" || sub == "O" || sub == "o" {
+                if !self.is_disconnect {
+                    slog::info!(logger, "Detect disconnect"; "text" => text.to_string());
+                    self.disconnect_count += 1;
+                }
+            } else {
+                self.disconnect_count -= 1;
+                if self.disconnect_count < 0 {
+                    self.disconnect_count = 0;
+                }
+                self.is_disconnect = false;
+            }
+            // } else {
+            //     self.client_stats.is_disconnect = false;
+            //     if self.rotation_movement_tries < 30 {
+            //         play!(self.movement => [
+            //             // Rotate in random direction for a random duration
+            //             Rotate(rot::Right, dur::Fixed(50)),
+            //             // Wait a bit to wait for monsters to enter view
+            //             Wait(dur::Fixed(1000)),
+            //         ]);
+            //         self.rotation_movement_tries += 1;
+            //     }
+        }
+    }
+
+    fn perform_ocr(
+        &self,
+        image_buffer: &ImageBuffer,
+        area: BoundsArea,
+        lang: Option<&str>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        // Initialize the Tesseract API
+        let mut tesseract: Tesseract = Tesseract::new(None, Some("eng")).unwrap();
+        if let Some(real_lang) = lang {
+            tesseract = Tesseract::new(None, lang).unwrap();
+        }
+
+        let rgb_image = Self::rgba8_to_rgb8(image_buffer.clone());
+        // rgb_image.save("screen.png").expect("save error");
+        // Convert the ImageBuffer to a DynamicImage
+        let mut raw = DynamicImage::ImageRgb8(rgb_image);
+
+        let _width: u32 = raw.width();
+        let _height: u32 = raw.height();
+
+        let bounds = area.to_rect();
+        let corp_img =
+            image::imageops::crop(&mut raw, bounds.x, bounds.y, bounds.w, bounds.h).to_image();
+        // let corp_img = image::imageops::crop(&mut raw,0,0,_width,_height).to_image();
+
+        // let luma_corp = DynamicImage::ImageRgba8(corp_img).into_luma8();
+        // let adapt_corp = adaptive_threshold(&luma_corp, 123);
+
+        // corp_img.save("crop.png").unwrap();
+        // Convert the DynamicImage to a leptonica Pix object
+        // let pix = leptonica::Pix::from_dynamic_image(&dynamic_image);
+        let mut bytes: Vec<u8> = Vec::new();
+        let _ = corp_img.write_to(&mut Cursor::new(&mut bytes), image::ImageOutputFormat::Png);
+
+        // Set the image for OCR
+        let text: String = tesseract
+            .set_image_from_mem(&bytes)
+            .unwrap()
+            .recognize()
+            .unwrap()
+            .get_text()
+            .unwrap();
+        Ok(text)
+    }
+
     pub fn pixel_detection(
         &self,
         colors: Vec<Color>,
@@ -73,6 +221,9 @@ impl ImageAnalyzer {
     ) -> Receiver<Point> {
         let (snd, recv) = sync_channel::<Point>(4096);
         let image = self.image.as_ref().unwrap();
+
+        let dimension = image.dimensions();
+        let content = image.as_raw();
 
         if max_x == 0 {
             max_x = image.width();
@@ -285,7 +436,11 @@ impl ImageAnalyzer {
         }
 
         // Find biggest target marker
-        target_markers.into_iter().max_by_key(|x| x.bounds.size())
+        target_markers
+            .into_iter()
+            .max_by_key(|x| x.bounds.size())
+            .filter(|x| x.bounds.size() > 1)
+            
     }
     pub fn get_target_marker_distance(&self, mob: Target) -> i32 {
         let image = self.image.as_ref().unwrap();
@@ -328,12 +483,26 @@ impl ImageAnalyzer {
 
         // Sort by distance
         distances.sort_by_key(|&(_, distance)| distance);
-
-        // Remove mobs that are too far away
-        distances = distances
-            .into_iter()
-            .filter(|&(_, distance)| distance <= max_distance)
-            .collect();
+        let fdistances = distances.clone();
+        if distances.len() > 1 {
+            // Remove mobs that are too far away
+            distances = distances
+                .into_iter()
+                .filter(|&(mob, distance)| {
+                    distance
+                        <= match mob.target_type {
+                            TargetType::Mob(mob_type) => match mob_type {
+                                MobType::Passive => max_distance,
+                                MobType::Aggressive => max_distance / 2,
+                            },
+                            TargetType::TargetMarker => max_distance,
+                        }
+                })
+                .collect();
+            if distances.len() <= 1 {
+                distances = fdistances.clone();
+            }
+        }
 
         if let Some(avoided_bounds) = avoid_list {
             // Try finding closest mob that's not the mob to be avoided

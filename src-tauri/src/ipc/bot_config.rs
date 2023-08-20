@@ -79,6 +79,27 @@ impl SlotBar {
             //.choose(rng)
             .map(|(index, _)| (slot_bar_index, index))
     }
+
+    /// Get all usable matching slot indexes
+    pub fn get_usable_slot_indexes(
+        &self,
+        slot_type: SlotType,
+        threshold: Option<u32>,
+        last_slots_usage: [[Option<Instant>; 10]; 9],
+        slot_bar_index: usize,
+    ) -> Vec<(usize, usize)> {
+        self.slots()
+            .iter()
+            .enumerate()
+            .filter(|(index, slot)| {
+                slot.slot_type == slot_type
+                    && slot.slot_enabled
+                    && slot.slot_threshold.unwrap_or(100) >= threshold.unwrap_or(0)
+                    && last_slots_usage[slot_bar_index][*index].is_none()
+            })
+            .map(|(index, _)| (slot_bar_index, index))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -155,6 +176,9 @@ pub struct FarmingConfig {
     max_mobs_name_width: Option<u32>,
 
     min_hp_attack: Option<u32>,
+    pickup_duration: Option<u32>,
+    hit_and_run: Option<bool>,
+    auto_bird_view: Option<bool>,
     on_death_disconnect: Option<bool>,
     interval_between_buffs: Option<u64>,
     mobs_timeout: Option<u64>,
@@ -170,7 +194,7 @@ impl FarmingConfig {
     }
 
     pub fn on_death_disconnect(&self) -> bool {
-        self.on_death_disconnect.unwrap_or(true)
+        self.on_death_disconnect.unwrap_or(false)
     }
 
     pub fn circle_pattern_rotation_duration(&self) -> u64 {
@@ -195,6 +219,18 @@ impl FarmingConfig {
 
     pub fn min_hp_attack(&self) -> u32 {
         self.min_hp_attack.unwrap_or(0)
+    }
+
+    pub fn pickup_duration(&self) -> u32 {
+        self.pickup_duration.unwrap_or(1500)
+    }
+    
+    pub fn hit_and_run(&self) -> bool {
+        self.hit_and_run.unwrap_or(false)
+    }
+
+    pub fn auto_bird_view(&self) -> bool {
+        self.auto_bird_view.unwrap_or(true)
     }
 
     pub fn passive_mobs_colors(&self) -> [Option<u8>; 3] {
@@ -257,6 +293,25 @@ impl FarmingConfig {
             }
         }
         None
+    }
+
+    pub fn get_usable_slot_indexes(
+        &self,
+        slot_type: SlotType,
+        threshold: Option<u32>,
+        last_slots_usage: [[Option<Instant>; 10]; 9],
+    ) -> Vec<(usize, usize)> {
+        let mut indexes = Vec::new();
+        for n in 0..9 {
+            let found_indexes = self.slot_bars()[n].get_usable_slot_indexes(
+                slot_type,
+                threshold,
+                last_slots_usage,
+                n,
+            );
+            indexes.extend(found_indexes);
+        }
+        indexes
     }
 
     pub fn is_stop_fighting(&self) -> bool {
@@ -322,6 +377,25 @@ impl SupportConfig {
             }
         }
         None
+    }
+    
+    pub fn get_usable_slot_indexes(
+        &self,
+        slot_type: SlotType,
+        threshold: Option<u32>,
+        last_slots_usage: [[Option<Instant>; 10]; 9],
+    ) -> Vec<(usize, usize)> {
+        let mut indexes = Vec::new();
+        for n in 0..9 {
+            let found_indexes = self.slot_bars()[n].get_usable_slot_indexes(
+                slot_type,
+                threshold,
+                last_slots_usage,
+                n,
+            );
+            indexes.extend(found_indexes);
+        }
+        indexes
     }
 }
 

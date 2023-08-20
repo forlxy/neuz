@@ -190,6 +190,24 @@ const FarmingConfig = ({ className, info, config, onChange, botStopWatch, botSta
                         item={<NumericInput unit='%' value={config.min_hp_attack} onChange={value => onChange({...config, min_hp_attack: value})} />}
                     />
 
+                    <ConfigTableRow
+                        layout="v"
+                        label={<ConfigLabel name="HNR" helpText='Hit monster and run to the next one.'/>}
+                        item={<BooleanSlider value={config.hit_and_run ?? false} onChange={value => onChange({...config, hit_and_run: value})} />}
+                    />
+
+                    <ConfigTableRow
+                        layout="v"
+                        label={<ConfigLabel name="Auto Bird View" helpText='Auto scale view to minimum.'/>}
+                        item={<BooleanSlider value={config.auto_bird_view ?? true} onChange={value => onChange({...config, auto_bird_view: value})} />}
+                    />
+
+                    <ConfigTableRow
+                            layout="v"
+                            label={<ConfigLabel name="Pickup Motion Duration" helpText="Will try to pickup items for a while." />}
+                            item={<NumericInput unit='ms' value={config.pickup_duration ?? 1500} onChange={value => onChange({...config, pickup_duration: value})} />}
+                        />
+
                 </ConfigTable>
             }/>
             <Modal isShowing={debugWarningModal.isShown} hide={debugWarningModal.close}
@@ -209,7 +227,7 @@ const FarmingConfig = ({ className, info, config, onChange, botStopWatch, botSta
                     />
                     <ConfigTableRow
                         label={<ConfigLabel name="Disconnect" helpText="Enable will automatically disconnect, otherwise we'll wait for revive" />}
-                        item={<BooleanSlider value={config.on_death_disconnect ?? true} onChange={value => onChange?.({ ...config, on_death_disconnect: value })} />}
+                        item={<BooleanSlider value={config.on_death_disconnect ?? false} onChange={value => onChange?.({ ...config, on_death_disconnect: value })} />}
                     />
                 </ConfigTable>
             }/>
