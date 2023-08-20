@@ -7,10 +7,13 @@ use tauri::{Manager, Window};
 use super::Behavior;
 use crate::{
     data::{Bounds, MobType, Point, Target, TargetType},
-    image_analyzer::ImageAnalyzer,
+    image_analyzer::{Color, ImageAnalyzer},
     ipc::{BotConfig, FarmingConfig, FrontendInfo, SlotType},
     movement::MovementAccessor,
-    platform::{eval_mob_click, send_slot_eval},
+    platform::{
+        draw_bounds_rect, eval_mob_click, eval_send_key, remove_all_markers, send_slot_eval,
+        KeyMode,
+    },
     play,
     utils::DateTime,
 };
@@ -100,7 +103,7 @@ impl<'a> Behavior<'a> for FarmingBehavior<'a> {
             State::SearchingForEnemy => self.on_searching_for_enemy(config, image),
             State::EnemyFound(mob) => self.on_enemy_found(mob),
             State::Attacking(mob) => self.on_attacking(config, mob, image),
-            State::AfterEnemyKill(_) => self.after_enemy_kill(frontend_info, config),
+            State::AfterEnemyKill(_) => self.after_enemy_kill(frontend_info, config, image),
         };
 
         frontend_info.set_is_attacking(self.is_attacking);
@@ -218,7 +221,7 @@ impl FarmingBehavior<'_> {
     }
 
     /// Pickup items on the ground.
-    fn pickup_items(&mut self, config: &FarmingConfig) {
+    fn pickup_items(&mut self, config: &FarmingConfig, image: &mut ImageAnalyzer) {
         let slot = self.get_slot_for(config, None, SlotType::PickupPet, false);
         if let Some(index) = slot {
             if self.last_summon_pet_time.is_none() {
@@ -231,9 +234,10 @@ impl FarmingBehavior<'_> {
         } else {
             let slot = self.get_slot_for(config, None, SlotType::PickupMotion, false);
             if let Some(index) = slot {
-                for _i in 1..10 {
+                for _i in 1..(config.pickup_duration() / 150) {
                     send_slot_eval(self.window, index.0, index.1);
                     std::thread::sleep(Duration::from_millis(150));
+                    self.check_restorations(config, image);
                 }
             }
         }
@@ -243,20 +247,20 @@ impl FarmingBehavior<'_> {
         // Check HP
         let stat = Some(image.client_stats.hp.value);
         if image.client_stats.hp.value > 0 {
-            self.get_slot_for(config, stat, SlotType::Pill, true);
+            self.get_slots_for(config, stat, SlotType::Pill, true);
             self.get_slots_for(config, stat, SlotType::Food, true);
         }
 
         // Check MP
         let stat = Some(image.client_stats.mp.value);
         if image.client_stats.mp.value > 0 {
-            self.get_slot_for(config, stat, SlotType::MpRestorer, true);
+            self.get_slots_for(config, stat, SlotType::MpRestorer, true);
         }
 
         // Check FP
         let stat = Some(image.client_stats.fp.value);
         if image.client_stats.fp.value > 0 {
-            self.get_slot_for(config, stat, SlotType::FpRestorer, true);
+            self.get_slots_for(config, stat, SlotType::FpRestorer, true);
         }
     }
 
@@ -323,6 +327,13 @@ impl FarmingBehavior<'_> {
         config: &FarmingConfig,
         image: &mut ImageAnalyzer,
     ) -> State {
+        if config.auto_bird_view() {
+            eval_send_key(&self.window, "ArrowUp", KeyMode::Hold);
+            eval_send_key(&self.window, "PageDown", KeyMode::Hold);
+            std::thread::sleep(Duration::from_millis(20));
+            eval_send_key(&self.window, "ArrowUp", KeyMode::Release);
+            eval_send_key(&self.window, "PageDown", KeyMode::Release);
+        }
         if config.is_stop_fighting() {
             return State::Attacking(Target::default());
         }
@@ -336,7 +347,7 @@ impl FarmingBehavior<'_> {
                 true => 325,
                 false => 1000,
             };
-
+            remove_all_markers(self.window);
             // Get aggressive mobs to prioritize them, but divide max_distance by 2 for aggressive mobs to avoid uncontrolable moving
             let mut mob_list = mobs
                 .iter()
@@ -344,8 +355,23 @@ impl FarmingBehavior<'_> {
                 .cloned()
                 .collect::<Vec<_>>();
 
+            for mob in mob_list.clone() {
+                draw_bounds_rect(
+                    self.window,
+                    mob.bounds.x,
+                    mob.bounds.y,
+                    mob.bounds.w,
+                    mob.bounds.h,
+                    Color::new(255, 0, 255),
+                );
+            }
+
             // Check again
-            if !mob_list.is_empty() && !(self.last_killed_type == MobType::Aggressive && mob_list.len() == 1 && self.last_kill_time.elapsed().as_millis() < 5000) {
+            if !mob_list.is_empty()
+                && !(self.last_killed_type == MobType::Aggressive
+                    && mob_list.len() == 1
+                    && self.last_kill_time.elapsed().as_millis() < 5000)
+            {
                 self.rotation_movement_tries = 0;
                 //slog::debug!(self.logger, "Found mobs"; "mob_type" => mob_type, "mob_count" => mob_list.len());
                 if let Some(mob) = {
@@ -362,18 +388,28 @@ impl FarmingBehavior<'_> {
                     }
                 } {
                     // Transition to next state
-                    return State::EnemyFound(*mob)
+                    return State::EnemyFound(*mob);
                 }
-            } 
+            }
             mob_list.clear();
             // Check if there's aggressive mobs otherwise collect passive mobs
-            if image.client_stats.hp.value >= config.min_hp_attack()
-            {
+            if image.client_stats.hp.value >= config.min_hp_attack() {
                 mob_list = mobs
                     .iter()
                     .filter(|m| m.target_type == TargetType::Mob(MobType::Passive))
                     .cloned()
                     .collect::<Vec<_>>();
+            }
+
+            for mob in mob_list.clone() {
+                draw_bounds_rect(
+                    self.window,
+                    mob.bounds.x,
+                    mob.bounds.y,
+                    mob.bounds.w,
+                    mob.bounds.h,
+                    Color::new(255, 0, 255),
+                );
             }
 
             // Check again
@@ -477,6 +513,7 @@ impl FarmingBehavior<'_> {
             self.obstacle_avoidance_count += 1;
             false
         } else {
+            println!("1");
             self.abort_attack(image);
             true
         }
@@ -495,6 +532,18 @@ impl FarmingBehavior<'_> {
         let is_mob_alive = image.identify_target_marker(false).is_some()
             || image.client_stats.target_mp.value > 0
             || image.client_stats.target_hp.value > 0;
+        if let Some(target) = image.identify_target_marker(false) {
+            draw_bounds_rect(
+                self.window,
+                target.bounds.x,
+                target.bounds.y,
+                target.bounds.w,
+                target.bounds.h,
+                Color::new(200, 100, 200),
+            );
+            // println!("x:{} y:{}, w:{} h:{}", target.bounds.x, target.bounds.y, target.bounds.w, target.bounds.h);
+        }
+        // println!("is_mob_alive:{} mp.value:{} hp.value:{}", is_mob_alive, image.client_stats.target_mp.value, image.client_stats.target_hp.value);
 
         if !self.is_attacking && !config.is_stop_fighting() {
             if is_npc {
@@ -508,6 +557,7 @@ impl FarmingBehavior<'_> {
                 if image.client_stats.target_hp.value < 100 && config.prevent_already_attacked() {
                     // If we didn't took any damages abort attack
                     if hp_last_update.elapsed().as_millis() > 5000 {
+                        println!("2");
                         return self.abort_attack(image);
                     } else if self.stealed_target_count > 5 {
                         self.stealed_target_count = 0;
@@ -555,8 +605,13 @@ impl FarmingBehavior<'_> {
                 }
             }
 
+            // Still dotting
+            if image.client_stats.target_hp.last_value > image.client_stats.target_hp.value && config.hit_and_run() {
+                return self.abort_attack(image);
+            }
+
             // Try to use attack skill if at least one is selected in slot bar
-            self.get_slot_for(config, None, SlotType::AttackSkill, true);
+            self.get_slots_for(config, None, SlotType::AttackSkill, true);
 
             self.state
         } else if !is_mob_alive && image.client_stats.is_alive() && self.is_attacking {
@@ -620,6 +675,7 @@ impl FarmingBehavior<'_> {
         &mut self,
         frontend_info: &mut FrontendInfo,
         config: &FarmingConfig,
+        image: &mut ImageAnalyzer,
     ) -> State {
         self.kill_count += 1;
         frontend_info.set_kill_count(self.kill_count);
@@ -629,7 +685,7 @@ impl FarmingBehavior<'_> {
         self.last_kill_time = Instant::now();
 
         // Pickup items
-        self.pickup_items(config);
+        self.pickup_items(config, image);
 
         // Transition state
         State::SearchingForEnemy

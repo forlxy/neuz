@@ -30,7 +30,7 @@ use crate::{
     image_analyzer::ImageAnalyzer,
     ipc::{BotConfig, BotMode},
     movement::MovementAccessor,
-    platform::{eval_send_key, KeyMode},
+    platform::{eval_send_key, KeyMode, remove_all_markers},
     utils::Timer,
 };
 
@@ -435,6 +435,7 @@ fn start_bot(profile_id: String, state: tauri::State<AppState>, app_handle: taur
                 }
                 std::thread::sleep(std::time::Duration::from_millis(250));
                 timer.silence();
+                remove_all_markers(&window);
                 continue;
             }
 

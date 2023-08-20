@@ -3,7 +3,7 @@ use std::time::Duration;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use tauri::Window;
 
-use crate::data::Point;
+use crate::{data::Point, image_analyzer::Color};
 
 #[derive(Debug)]
 pub enum KeyMode {
@@ -64,7 +64,36 @@ pub fn send_slot_eval(window: &Window, slot_bar_index: usize, k: usize) {
         KeyMode::Press,
     );
     eval_send_key(window, k.to_string().as_str(), KeyMode::Press);
-    println!("send_slot_eval k:{} slot_bar_index:{}", k.to_string().as_str(), format!("F{}", slot_bar_index + 1));
+    // println!("send_slot_eval k:{} slot_bar_index:{}", k.to_string().as_str(), format!("F{}", slot_bar_index + 1));
+}
+
+pub fn draw_bounds_rect(window: &Window, x: u32, y: u32, w: u32, h: u32, color: Color) {
+    drop(
+        window.eval(
+            format!(
+                r#"
+                var div = document.createElement('div');
+                div.style.position = 'absolute';
+                div.className = 'marker';
+                div.style.left = '{}px';
+                div.style.top = '{}px';
+                div.style.width = '{}px';
+                div.style.height = '{}px';
+                div.style.border = '2px solid #{}';
+                document.body.appendChild(div);
+                "#, x, y, w, h, rgb_to_hex(color.refs[0], color.refs[1], color.refs[2])
+            )
+            .as_str(),
+        ),
+    );
+}
+
+fn rgb_to_hex(red: u8, green: u8, blue: u8) -> String {
+    format!("{:02X}{:02X}{:02X}", red, green, blue)
+}
+
+pub fn remove_all_markers(window: &Window) {
+    drop(window.eval("document.querySelectorAll('.marker').forEach(e => e.remove())"));
 }
 
 /* pub fn eval_mouse_click_at_point(window: &Window, pos: Point) {

@@ -6,7 +6,7 @@ use tauri::Window;
 use super::PointCloud;
 use crate::{
     image_analyzer::{Color, ImageAnalyzer},
-    platform::{eval_send_key, KeyMode},
+    platform::{eval_send_key, KeyMode, draw_bounds_rect, remove_all_markers},
 };
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -44,11 +44,11 @@ pub struct ClientStats {
 impl ClientStats {
     pub fn new(window: Window) -> Self {
         Self {
-            hp: StatInfo::new(0, 100, StatusBarKind::Hp, None),
-            mp: StatInfo::new(0, 100, StatusBarKind::Mp, None),
-            fp: StatInfo::new(0, 100, StatusBarKind::Fp, None),
-            target_hp: StatInfo::new(0, 0, StatusBarKind::TargetHP, None),
-            target_mp: StatInfo::new(0, 0, StatusBarKind::TargetMP, None),
+            hp: StatInfo::new(0, 100, StatusBarKind::Hp, None, window.clone()),
+            mp: StatInfo::new(0, 100, StatusBarKind::Mp, None, window.clone()),
+            fp: StatInfo::new(0, 100, StatusBarKind::Fp, None, window.clone()),
+            target_hp: StatInfo::new(0, 0, StatusBarKind::TargetHP, None, window.clone()),
+            target_mp: StatInfo::new(0, 0, StatusBarKind::TargetMP, None, window.clone()),
             is_alive: true,
             stat_try_not_detected_count: 0,
             window,
@@ -111,13 +111,14 @@ impl ClientStats {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct StatInfo {
     pub max_w: u32,
     pub value: u32,
     pub stat_kind: StatusBarKind,
     pub last_value: u32,
     pub last_update_time: Option<Instant>,
+    window: Window,
 }
 
 impl PartialEq for StatInfo {
@@ -138,6 +139,7 @@ impl StatInfo {
         value: u32,
         stat_kind: StatusBarKind,
         image: Option<&ImageAnalyzer>,
+        window: Window,
     ) -> Self {
         let mut res = Self {
             max_w,
@@ -145,6 +147,7 @@ impl StatInfo {
             stat_kind,
             last_update_time: Some(Instant::now()),
             last_value: 100,
+            window,
         };
         if let Some(image) = image {
             res.update_value(image);
@@ -158,6 +161,7 @@ impl StatInfo {
     }
 
     pub fn update_value(&mut self, image: &ImageAnalyzer) -> bool {
+        remove_all_markers(&self.window);
         let status_bar_config: StatusBarConfig = self.stat_kind.into();
         let recv = image.pixel_detection(
             status_bar_config.refs,
@@ -180,6 +184,17 @@ impl StatInfo {
         // Calculate bounds
         let bounds = cloud.to_bounds();
 
+        // let status_bar_config: StatusBarConfig = self.stat_kind.into();
+        
+        // draw_bounds_rect(
+        //     &self.window,
+        //     bounds.x,
+        //     bounds.y,
+        //     bounds.w,
+        //     bounds.h,
+        //     status_bar_config.refs[0],
+        // );
+        
         // Recalculate value tracking info
         let updated_max_w = bounds.w.max(self.max_w);
         let value_frac = bounds.w as f32 / updated_max_w as f32;
@@ -190,6 +205,7 @@ impl StatInfo {
         if updated_max_w != old_max_w {
             self.max_w = updated_max_w;
         }
+        self.last_value = old_value;
         if updated_value != old_value {
             self.value = updated_value;
             self.last_update_time = Some(Instant::now());

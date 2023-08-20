@@ -436,7 +436,11 @@ impl ImageAnalyzer {
         }
 
         // Find biggest target marker
-        target_markers.into_iter().max_by_key(|x| x.bounds.size())
+        target_markers
+            .into_iter()
+            .max_by_key(|x| x.bounds.size())
+            .filter(|x| x.bounds.size() > 1)
+            
     }
     pub fn get_target_marker_distance(&self, mob: Target) -> i32 {
         let image = self.image.as_ref().unwrap();
@@ -479,18 +483,26 @@ impl ImageAnalyzer {
 
         // Sort by distance
         distances.sort_by_key(|&(_, distance)| distance);
-
-        // Remove mobs that are too far away
-        distances = distances
-            .into_iter()
-            .filter(|&(mob, distance)| distance <= match mob.target_type {
-                TargetType::Mob(mob_type) => match mob_type {
-                    MobType::Passive => max_distance,
-                    MobType::Aggressive => max_distance / 2,
-                } ,
-                TargetType::TargetMarker => max_distance,
-            })
-            .collect();
+        let fdistances = distances.clone();
+        if distances.len() > 1 {
+            // Remove mobs that are too far away
+            distances = distances
+                .into_iter()
+                .filter(|&(mob, distance)| {
+                    distance
+                        <= match mob.target_type {
+                            TargetType::Mob(mob_type) => match mob_type {
+                                MobType::Passive => max_distance,
+                                MobType::Aggressive => max_distance / 2,
+                            },
+                            TargetType::TargetMarker => max_distance,
+                        }
+                })
+                .collect();
+            if distances.len() <= 1 {
+                distances = fdistances.clone();
+            }
+        }
 
         if let Some(avoided_bounds) = avoid_list {
             // Try finding closest mob that's not the mob to be avoided

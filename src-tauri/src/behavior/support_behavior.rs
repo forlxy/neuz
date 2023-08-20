@@ -161,6 +161,28 @@ impl SupportBehavior<'_> {
         }
         None
     }
+    
+    fn get_slots_for(
+        &mut self,
+        config: &SupportConfig,
+        threshold: Option<u32>,
+        slot_type: SlotType,
+        send: bool,
+    ) -> Vec<(usize, usize)> {
+        let mut indexes = Vec::new();
+        let slot_indexes =
+            config.get_usable_slot_indexes(slot_type, threshold, self.slots_usage_last_time);
+        if !slot_indexes.is_empty() {
+            for slot_index in slot_indexes {
+                if send {
+                    //slog::debug!(self.logger, "Slot usage"; "slot_type" => slot_type.to_string(), "value" => threshold);
+                    self.send_slot(slot_index);
+                }
+                indexes.push(slot_index);
+            }
+        }
+        indexes
+    }
 
     fn send_slot(&mut self, slot_index: (usize, usize)) {
         // Send keystroke for first slot mapped to pill
@@ -180,30 +202,27 @@ impl SupportBehavior<'_> {
     fn check_restorations(&mut self, config: &SupportConfig, image: &mut ImageAnalyzer) {
         // Check HP
         let stat = Some(image.client_stats.hp.value);
-        if image.client_stats.hp.value > 0
-            && self
-                .get_slot_for(config, stat, SlotType::Pill, true)
-                .is_none()
-        {
-            self.get_slot_for(config, stat, SlotType::Food, true);
+        if image.client_stats.hp.value > 0 {
+            self.get_slots_for(config, stat, SlotType::Pill, true);
+            self.get_slots_for(config, stat, SlotType::Food, true);
         }
 
         //Check target HP
         let stat = Some(image.client_stats.target_hp.value);
         if image.client_stats.target_hp.value > 0 {
-            self.get_slot_for(config, stat, SlotType::HealSkill, true);
+            self.get_slots_for(config, stat, SlotType::HealSkill, true);
         }
 
         // Check MP
         let stat = Some(image.client_stats.mp.value);
         if image.client_stats.mp.value > 0 {
-            self.get_slot_for(config, stat, SlotType::MpRestorer, true);
+            self.get_slots_for(config, stat, SlotType::MpRestorer, true);
         }
 
         // Check FP
         let stat = Some(image.client_stats.fp.value);
         if image.client_stats.fp.value > 0 {
-            self.get_slot_for(config, stat, SlotType::FpRestorer, true);
+            self.get_slots_for(config, stat, SlotType::FpRestorer, true);
         }
     }
 }

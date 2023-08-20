@@ -75,7 +75,7 @@ const SupportConfig = ({ className, info, config, onChange, botStopWatch, botSta
                     <ConfigTableRow
                         layout="v"
                         label={<ConfigLabel name="Disconnect" helpText="If enabled will automatically disconnect the dead character, otherwise we'll try to revive by pressing ENTER" />}
-                        item={<BooleanSlider value={config.on_death_disconnect ?? true} onChange={value => onChange?.({ ...config, on_death_disconnect: value })} />}
+                        item={<BooleanSlider value={config.on_death_disconnect ?? false} onChange={value => onChange?.({ ...config, on_death_disconnect: value })} />}
                     />
                 </ConfigTable>
             }/>

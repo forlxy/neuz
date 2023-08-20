@@ -91,6 +91,9 @@ export type FarmingConfigModel = Partial<{
     max_mobs_name_width: number,
 
     min_hp_attack: number,
+    pickup_duration: number,
+    hit_and_run: boolean,
+    auto_bird_view: boolean,
     on_death_disconnect: boolean,
     interval_between_buffs: number,
     mobs_timeout: number,
